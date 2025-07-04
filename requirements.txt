@@ -1,0 +1,9 @@
+# Compatible versions for Python 3.8-3.13
+pyserial>=3.5
+matplotlib>=3.8.0p
+pandas>=2.1.0
+numpy>=1.24.0
+# Optional: remove ttkthemes if causing issues
+# ttkthemes>=3.2.2
+pyinstaller==5.13.2
+auto-py-to-exe==2.40.0
