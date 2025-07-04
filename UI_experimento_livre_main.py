@@ -88,28 +88,68 @@ class TribologyExperimentGUI:
         params_frame = ttk.LabelFrame(config_frame, text="Experiment Parameters", padding=10)
         params_frame.pack(fill=tk.X, padx=10, pady=5)
         
-        # Force control mode
+        # Force control mode checkbox
         self.force_mode_var = tk.BooleanVar(value=self.config.get_experiment_params()["USE_FORCE_CONTROL_MODE"])
-        ttk.Checkbutton(params_frame, text="Use Force Control Mode", 
-                       variable=self.force_mode_var,
-                       command=self.update_config).grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=2)
+        force_mode_cb = ttk.Checkbutton(params_frame, text="Use Force Control Mode", 
+                                       variable=self.force_mode_var,
+                                       command=self.on_force_mode_changed)
+        force_mode_cb.grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=2)
         
-        # RPM settings
-        params = [
+        # Store parameter widgets for dynamic show/hide
+        self.param_vars = {}
+        self.param_widgets = {}  # Store labels and entries for show/hide
+        
+        # Always visible parameters
+        always_visible = [
             ("RPM Pump:", "RPM_PUMP"),
-            ("RPM Axis:", "RPM_AXIS"), 
-            ("RPM Force:", "RPM_FORCE"),
+            ("RPM Axis:", "RPM_AXIS"),
             ("Experiment Duration (s):", "EXPERIMENT_DURATION_S")
         ]
         
-        self.param_vars = {}
-        for i, (label, key) in enumerate(params, start=1):
-            ttk.Label(params_frame, text=label).grid(row=i, column=0, sticky=tk.W, pady=2)
+        # Force control mode only parameters
+        force_control_only = [
+            ("RPM Force:", "RPM_FORCE"),
+            ("Target Force (N):", "TARGET_FORCE_N")
+        ]
+        
+        # Create always visible parameters
+        row = 1
+        for label_text, key in always_visible:
+            label = ttk.Label(params_frame, text=label_text)
+            label.grid(row=row, column=0, sticky=tk.W, pady=2)
+            
             var = tk.DoubleVar(value=self.config.get_experiment_params()[key])
             self.param_vars[key] = var
+            
             entry = ttk.Entry(params_frame, textvariable=var, width=15)
-            entry.grid(row=i, column=1, padx=5, pady=2)
+            entry.grid(row=row, column=1, padx=5, pady=2)
             entry.bind('<FocusOut>', lambda e, k=key: self.update_config())
+            
+            # Store widgets (these are always visible, so no need to store for show/hide)
+            row += 1
+        
+        # Create force control mode only parameters
+        for label_text, key in force_control_only:
+            label = ttk.Label(params_frame, text=label_text)
+            label.grid(row=row, column=0, sticky=tk.W, pady=2)
+            
+            var = tk.DoubleVar(value=self.config.get_experiment_params()[key])
+            self.param_vars[key] = var
+            
+            entry = ttk.Entry(params_frame, textvariable=var, width=15)
+            entry.grid(row=row, column=1, padx=5, pady=2)
+            entry.bind('<FocusOut>', lambda e, k=key: self.update_config())
+            
+            # Store widgets for show/hide
+            self.param_widgets[key] = {
+                'label': label,
+                'entry': entry,
+                'row': row
+            }
+            row += 1
+        
+        # Initially set visibility based on current mode
+        self.update_force_mode_visibility()
         
         # Save/Load configuration
         config_buttons_frame = ttk.Frame(config_frame)
@@ -299,11 +339,15 @@ class TribologyExperimentGUI:
         self.force_mode_var.set(params["USE_FORCE_CONTROL_MODE"])
         
         for key, var in self.param_vars.items():
-            var.set(params[key])
+            if key in params:  # Check if key exists in loaded config
+                var.set(params[key])
         
         serial_settings = self.config.get("serial_settings")
         self.port_var.set(serial_settings["port"])
         self.baudrate_var.set(serial_settings["baudrate"])
+        
+        # Update visibility after loading config
+        self.update_force_mode_visibility()
     
     def start_experiment(self):
         """Start the experiment."""
@@ -487,7 +531,31 @@ class TribologyExperimentGUI:
         
         self.disconnect_serial()
         self.root.destroy()
-
+    
+    def on_force_mode_changed(self):
+        """Handle force control mode checkbox change."""
+        self.update_force_mode_visibility()
+        self.update_config()
+    
+    def update_force_mode_visibility(self):
+        """Show or hide force control mode specific parameters."""
+        force_mode_enabled = self.force_mode_var.get()
+        
+        # Parameters that should only be visible in force control mode
+        force_control_params = ["RPM_FORCE", "TARGET_FORCE_N"]
+        
+        for key in force_control_params:
+            if key in self.param_widgets:
+                widgets = self.param_widgets[key]
+                if force_mode_enabled:
+                    # Show the widgets
+                    widgets['label'].grid()
+                    widgets['entry'].grid()
+                else:
+                    # Hide the widgets
+                    widgets['label'].grid_remove()
+                    widgets['entry'].grid_remove()
+    
 def main():
     """Main application entry point."""
     root = tk.Tk()

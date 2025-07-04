@@ -14,7 +14,8 @@ class Config:
                 "RPM_PUMP": 500.0,
                 "RPM_AXIS": 80.0,
                 "RPM_FORCE": 60.0,
-                "EXPERIMENT_DURATION_S": 282.1
+                "EXPERIMENT_DURATION_S": 282.1,
+                "TARGET_FORCE_N": 5.0  # Force in Newtons for force control mode
             },
             "serial_settings": {
                 "port": "COM3",
