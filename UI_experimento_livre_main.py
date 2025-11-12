@@ -47,6 +47,7 @@ class TribologyExperimentGUI:
         self.setup_config_tab()
         self.setup_control_tab()
         self.setup_data_tab()
+        self.setup_sensors_tab()
         
     def setup_config_tab(self):
         """Setup configuration tab."""
@@ -263,6 +264,46 @@ class TribologyExperimentGUI:
     def setup_serial_callback(self):
         """Setup callback for serial data."""
         self.serial_comm.set_data_callback(self.handle_serial_data)
+
+    def setup_sensors_tab(self):
+        """Setup live sensors (load cells) tab."""
+        sensors_frame = ttk.Frame(self.notebook)
+        self.notebook.add(sensors_frame, text="Live Sensors")
+
+        info = ttk.Label(sensors_frame, text="Live load cell readings from device serial stream", anchor="w")
+        info.pack(fill=tk.X, padx=10, pady=(10, 0))
+
+        cards = ttk.Frame(sensors_frame)
+        cards.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Variables to display
+        self.lc_time_var = tk.StringVar(value="—")
+        self.lc_x_var = tk.StringVar(value="—")
+        self.lc_z_var = tk.StringVar(value="—")
+
+        def make_card(parent, title, var, fg="#222"):
+            frame = ttk.LabelFrame(parent, text=title, padding=15)
+            value_lbl = ttk.Label(frame, textvariable=var)
+            # Use a larger font for readability
+            try:
+                value_lbl.configure(font=("Segoe UI", 28, "bold"), foreground=fg)
+            except Exception:
+                pass
+            value_lbl.pack(anchor="center")
+            return frame
+
+        # Create three cards side by side
+        cards.columnconfigure(0, weight=1)
+        cards.columnconfigure(1, weight=1)
+        cards.columnconfigure(2, weight=1)
+
+        time_card = make_card(cards, "Time (s)", self.lc_time_var)
+        x_card = make_card(cards, "Force X (N)", self.lc_x_var, fg="#0057b8")
+        z_card = make_card(cards, "Force Z (N)", self.lc_z_var, fg="#d62828")
+
+        time_card.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
+        x_card.grid(row=0, column=1, sticky="nsew", padx=8, pady=8)
+        z_card.grid(row=0, column=2, sticky="nsew", padx=8, pady=8)
     
     def refresh_ports(self):
         """Refresh available serial ports."""
@@ -401,6 +442,23 @@ class TribologyExperimentGUI:
         # Log messages
         if "message" in data:
             self.log_status(f"Device: {data['message']}")
+        
+        # Update live sensors tab values when present
+        if "time" in data:
+            try:
+                self.lc_time_var.set(f"{float(data['time']):.2f}")
+            except Exception:
+                self.lc_time_var.set(str(data["time"]))
+        if "force_x" in data:
+            try:
+                self.lc_x_var.set(f"{float(data['force_x']):.3f}")
+            except Exception:
+                self.lc_x_var.set(str(data["force_x"]))
+        if "force_z" in data:
+            try:
+                self.lc_z_var.set(f"{float(data['force_z']):.3f}")
+            except Exception:
+                self.lc_z_var.set(str(data["force_z"]))
     
     def update_plots(self):
         """Update the data plots."""
