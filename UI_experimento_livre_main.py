@@ -151,6 +151,22 @@ class TribologyExperimentGUI:
         
         # Initially set visibility based on current mode
         self.update_force_mode_visibility()
+
+        # Sensor source selector (Simple/Free Sphere/Auto)
+        sensors_frame = ttk.LabelFrame(config_frame, text="Sensors", padding=10)
+        sensors_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        ttk.Label(sensors_frame, text="Sensor Source:").grid(row=0, column=0, sticky=tk.W)
+        self.sensor_source_var = tk.StringVar(value=self.config.get("data_settings", "sensor_source") or "auto")
+        self.sensor_source_combo = ttk.Combobox(
+            sensors_frame,
+            textvariable=self.sensor_source_var,
+            values=["auto", "simple_fixed", "free_sphere"],
+            width=20,
+            state="readonly"
+        )
+        self.sensor_source_combo.grid(row=0, column=1, padx=5, pady=2, sticky=tk.W)
+        self.sensor_source_combo.bind("<<ComboboxSelected>>", lambda e: self.update_config())
         
         # Save/Load configuration
         config_buttons_frame = ttk.Frame(config_frame)
@@ -350,6 +366,10 @@ class TribologyExperimentGUI:
         # Update serial settings
         self.config.set("serial_settings", "port", self.port_var.get())
         self.config.set("serial_settings", "baudrate", self.baudrate_var.get())
+
+        # Update data/sensor settings
+        if hasattr(self, "sensor_source_var"):
+            self.config.set("data_settings", "sensor_source", self.sensor_source_var.get())
     
     def save_config(self):
         """Save current configuration to file."""
@@ -387,6 +407,10 @@ class TribologyExperimentGUI:
         self.port_var.set(serial_settings["port"])
         self.baudrate_var.set(serial_settings["baudrate"])
         
+        # Sensor source
+        if hasattr(self, "sensor_source_var"):
+            self.sensor_source_var.set(self.config.get("data_settings", "sensor_source") or "auto")
+
         # Update visibility after loading config
         self.update_force_mode_visibility()
     
@@ -436,29 +460,58 @@ class TribologyExperimentGUI:
     
     def handle_serial_data(self, data):
         """Handle incoming serial data."""
+        # Choose mapping for sensors based on selection
+        source = self.config.get("data_settings", "sensor_source") or "auto"
+
+        # Determine force values based on preferred source
+        preferred_fx = None
+        preferred_fz = None
+
+        if source == "free_sphere":
+            preferred_fx = data.get("fx", data.get("force_x"))
+            preferred_fz = data.get("fz", data.get("force_z"))
+        elif source == "simple_fixed":
+            preferred_fx = data.get("fixed_x", data.get("force_x"))
+            preferred_fz = data.get("fixed_z", data.get("force_z"))
+        else:  # auto
+            # Prefer free sphere if Fx/Fz present, else fallback to Fixed
+            if "fx" in data or "fz" in data:
+                preferred_fx = data.get("fx", data.get("force_x"))
+                preferred_fz = data.get("fz", data.get("force_z"))
+            else:
+                preferred_fx = data.get("fixed_x", data.get("force_x"))
+                preferred_fz = data.get("fixed_z", data.get("force_z"))
+
+        # Build mapped record for data manager
+        mapped = dict(data)
+        if preferred_fx is not None:
+            mapped["force_x"] = preferred_fx
+        if preferred_fz is not None:
+            mapped["force_z"] = preferred_fz
+
         # Add data to manager
-        self.data_manager.add_data_point(data)
+        self.data_manager.add_data_point(mapped)
         
         # Log messages
         if "message" in data:
             self.log_status(f"Device: {data['message']}")
         
         # Update live sensors tab values when present
-        if "time" in data:
+        if "time" in mapped:
             try:
-                self.lc_time_var.set(f"{float(data['time']):.2f}")
+                self.lc_time_var.set(f"{float(mapped['time']):.2f}")
             except Exception:
-                self.lc_time_var.set(str(data["time"]))
-        if "force_x" in data:
+                self.lc_time_var.set(str(mapped.get("time")))
+        if "force_x" in mapped:
             try:
-                self.lc_x_var.set(f"{float(data['force_x']):.3f}")
+                self.lc_x_var.set(f"{float(mapped['force_x']):.3f}")
             except Exception:
-                self.lc_x_var.set(str(data["force_x"]))
-        if "force_z" in data:
+                self.lc_x_var.set(str(mapped.get("force_x")))
+        if "force_z" in mapped:
             try:
-                self.lc_z_var.set(f"{float(data['force_z']):.3f}")
+                self.lc_z_var.set(f"{float(mapped['force_z']):.3f}")
             except Exception:
-                self.lc_z_var.set(str(data["force_z"]))
+                self.lc_z_var.set(str(mapped.get("force_z")))
     
     def update_plots(self):
         """Update the data plots."""

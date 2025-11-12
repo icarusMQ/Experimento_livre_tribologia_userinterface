@@ -25,7 +25,8 @@ class Config:
             "data_settings": {
                 "save_directory": "experiment_data",
                 "auto_save": True,
-                "plot_update_interval": 100  # milliseconds
+                "plot_update_interval": 100,  # milliseconds
+                "sensor_source": "auto"  # auto | simple_fixed | free_sphere
             }
         }
         self.config = self.load_config()

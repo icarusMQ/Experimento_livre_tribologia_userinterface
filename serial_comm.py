@@ -108,18 +108,29 @@ class SerialCommunication:
         fx_match_fixed = re.search(r'Fixed_X:([\d.-]+)', line)
         fx_match_fx = re.search(r'\bFx:([\d.-]+)', line)
         if fx_match_fixed:
-            data["force_x"] = float(fx_match_fixed.group(1))
-        elif fx_match_fx:
-            data["force_x"] = float(fx_match_fx.group(1))
+            val = float(fx_match_fixed.group(1))
+            data["fixed_x"] = val
+            data["force_x"] = val if "force_x" not in data else data["force_x"]
+        if fx_match_fx:
+            val = float(fx_match_fx.group(1))
+            data["fx"] = val
+            # Prefer explicit Fx if no prior force_x set
+            if "force_x" not in data:
+                data["force_x"] = val
         
         # Extract Z force (supports both Simple and Force-Control modes)
         # Simple mode: Fixed_Z:<val>, Force mode: Fz:<val>
         fz_match_fixed = re.search(r'Fixed_Z:([\d.-]+)', line)
         fz_match_fz = re.search(r'\bFz:([\d.-]+)', line)
         if fz_match_fixed:
-            data["force_z"] = float(fz_match_fixed.group(1))
-        elif fz_match_fz:
-            data["force_z"] = float(fz_match_fz.group(1))
+            val = float(fz_match_fixed.group(1))
+            data["fixed_z"] = val
+            data["force_z"] = val if "force_z" not in data else data["force_z"]
+        if fz_match_fz:
+            val = float(fz_match_fz.group(1))
+            data["fz"] = val
+            if "force_z" not in data:
+                data["force_z"] = val
         
         # Only return data if we have force readings
         if "force_x" in data or "force_z" in data:
