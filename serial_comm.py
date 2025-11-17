@@ -155,6 +155,44 @@ class SerialCommunication:
         except Exception as e:
             print(f"Error sending command: {e}")
             return False
+
+    def send_config(self, params: Dict[str, Any], sensor_source: str = None) -> bool:
+        """Send experiment configuration to the device.
+
+        The command format is a single line (ending with \n):
+
+            CFG,MODE=<0|1>,RPM_PUMP=<float>,RPM_AXIS=<float>,
+                RPM_FORCE=<float>,T_FORCE=<float>,DUR=<float>,SENSOR=<name>
+
+        Where:
+            MODE      - 0 = simple mode, 1 = force-control mode
+            RPM_PUMP  - Pump motor RPM
+            RPM_AXIS  - Axis motor RPM
+            RPM_FORCE - Force motor RPM (used when MODE=1)
+            T_FORCE   - Target force in Newtons
+            DUR       - Experiment duration in seconds
+            SENSOR    - Which sensor source is selected on PC side
+        """
+        if not self.is_connected:
+            return False
+
+        try:
+            mode = 1 if params.get("USE_FORCE_CONTROL_MODE") else 0
+            sensor = sensor_source or "auto"
+            cmd = (
+                "CFG,"
+                f"MODE={mode},"
+                f"RPM_PUMP={float(params.get('RPM_PUMP', 0))},"
+                f"RPM_AXIS={float(params.get('RPM_AXIS', 0))},"
+                f"RPM_FORCE={float(params.get('RPM_FORCE', 0))},"
+                f"T_FORCE={float(params.get('TARGET_FORCE_N', 0))},"
+                f"DUR={float(params.get('EXPERIMENT_DURATION_S', 0))},"
+                f"SENSOR={sensor}"
+            )
+            return self.send_command(cmd)
+        except Exception as e:
+            print(f"Error building/sending config command: {e}")
+            return False
     
     def start_experiment(self) -> bool:
         """Send command to start the experiment."""

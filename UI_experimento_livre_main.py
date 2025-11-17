@@ -152,21 +152,25 @@ class TribologyExperimentGUI:
         # Initially set visibility based on current mode
         self.update_force_mode_visibility()
 
-        # Sensor source selector (Simple/Free Sphere/Auto)
+        # Sensor source selector (Simple / Free Sphere)
         sensors_frame = ttk.LabelFrame(config_frame, text="Sensors", padding=10)
         sensors_frame.pack(fill=tk.X, padx=10, pady=5)
 
         ttk.Label(sensors_frame, text="Sensor Source:").grid(row=0, column=0, sticky=tk.W)
-        self.sensor_source_var = tk.StringVar(value=self.config.get("data_settings", "sensor_source") or "auto")
+        # Remove 'auto' option, only explicit choices
+        default_sensor = self.config.get("data_settings", "sensor_source") or "simple_fixed"
+        if default_sensor not in ("simple_fixed", "free_sphere"):
+            default_sensor = "simple_fixed"
+        self.sensor_source_var = tk.StringVar(value=default_sensor)
         self.sensor_source_combo = ttk.Combobox(
             sensors_frame,
             textvariable=self.sensor_source_var,
-            values=["auto", "simple_fixed", "free_sphere"],
+            values=["simple_fixed", "free_sphere"],
             width=20,
             state="readonly"
         )
         self.sensor_source_combo.grid(row=0, column=1, padx=5, pady=2, sticky=tk.W)
-        self.sensor_source_combo.bind("<<ComboboxSelected>>", lambda e: self.update_config())
+        self.sensor_source_combo.bind("<<ComboboxSelected>>", self.on_sensor_source_changed)
         
         # Save/Load configuration
         config_buttons_frame = ttk.Frame(config_frame)
@@ -176,6 +180,8 @@ class TribologyExperimentGUI:
                   command=self.save_config).pack(side=tk.LEFT, padx=5)
         ttk.Button(config_buttons_frame, text="Load Configuration", 
                   command=self.load_config).pack(side=tk.LEFT, padx=5)
+        ttk.Button(config_buttons_frame, text="Send Config", 
+              command=self.send_config_to_device).pack(side=tk.LEFT, padx=5)
         
         # Initialize port list
         self.refresh_ports()
@@ -382,6 +388,7 @@ class TribologyExperimentGUI:
             self.config.config_file = filename
             self.config.save_config()
             self.log_status(f"Configuration saved to {filename}")
+            # Do not automatically send here; use explicit Send Config button
     
     def load_config(self):
         """Load configuration from file."""
@@ -407,12 +414,34 @@ class TribologyExperimentGUI:
         self.port_var.set(serial_settings["port"])
         self.baudrate_var.set(serial_settings["baudrate"])
         
-        # Sensor source
+        # Sensor source (ensure only explicit values)
         if hasattr(self, "sensor_source_var"):
-            self.sensor_source_var.set(self.config.get("data_settings", "sensor_source") or "auto")
+            sensor = self.config.get("data_settings", "sensor_source") or "simple_fixed"
+            if sensor not in ("simple_fixed", "free_sphere"):
+                sensor = "simple_fixed"
+            self.sensor_source_var.set(sensor)
 
         # Update visibility after loading config
         self.update_force_mode_visibility()
+
+    def send_config_to_device(self):
+        """Send current configuration to the connected device as CFG."""
+        if not self.serial_comm.is_connected:
+            messagebox.showerror("Error", "Please connect to the device before sending configuration")
+            return
+
+        # Ensure config object has latest GUI values
+        self.update_config()
+
+        try:
+            params = self.config.get_experiment_params()
+            sensor_source = self.config.get("data_settings", "sensor_source") or "simple_fixed"
+            if self.serial_comm.send_config(params, sensor_source=sensor_source):
+                self.log_status("Configuration sent to device over serial (CFG command)")
+            else:
+                self.log_status("Warning: Failed to send configuration to device")
+        except Exception as e:
+            self.log_status(f"Error while sending configuration to device: {e}")
     
     def start_experiment(self):
         """Start the experiment."""
@@ -461,7 +490,7 @@ class TribologyExperimentGUI:
     def handle_serial_data(self, data):
         """Handle incoming serial data."""
         # Choose mapping for sensors based on selection
-        source = self.config.get("data_settings", "sensor_source") or "auto"
+        source = self.config.get("data_settings", "sensor_source") or "simple_fixed"
 
         # Determine force values based on preferred source
         preferred_fx = None
@@ -470,17 +499,10 @@ class TribologyExperimentGUI:
         if source == "free_sphere":
             preferred_fx = data.get("fx", data.get("force_x"))
             preferred_fz = data.get("fz", data.get("force_z"))
-        elif source == "simple_fixed":
+        else:  # simple_fixed
             preferred_fx = data.get("fixed_x", data.get("force_x"))
             preferred_fz = data.get("fixed_z", data.get("force_z"))
-        else:  # auto
-            # Prefer free sphere if Fx/Fz present, else fallback to Fixed
-            if "fx" in data or "fz" in data:
-                preferred_fx = data.get("fx", data.get("force_x"))
-                preferred_fz = data.get("fz", data.get("force_z"))
-            else:
-                preferred_fx = data.get("fixed_x", data.get("force_x"))
-                preferred_fz = data.get("fixed_z", data.get("force_z"))
+
 
         # Build mapped record for data manager
         mapped = dict(data)
@@ -647,6 +669,19 @@ class TribologyExperimentGUI:
         """Handle force control mode checkbox change."""
         self.update_force_mode_visibility()
         self.update_config()
+
+    def on_sensor_source_changed(self, event=None):
+        """Handle change of sensor source selection.
+
+        Updates config and, if connected, immediately sends a CFG command so
+        the firmware knows the selected SENSOR mode.
+        """
+        # Persist new sensor source
+        self.update_config()
+
+        # If connected, send updated configuration (same params, new SENSOR)
+        if self.serial_comm.is_connected:
+            self.send_config_to_device()
     
     def update_force_mode_visibility(self):
         """Show or hide force control mode specific parameters."""

@@ -2,7 +2,7 @@
     "experiment_parameters": {
         "USE_FORCE_CONTROL_MODE": false,
         "RPM_PUMP": 500.0,
-        "RPM_AXIS": 80.0,
+        "RPM_AXIS": 150.0,
         "RPM_FORCE": 60.0,
         "EXPERIMENT_DURATION_S": 282.1,
         "TARGET_FORCE_N": 5.0
@@ -15,6 +15,7 @@
     "data_settings": {
         "save_directory": "experiment_data",
         "auto_save": true,
-        "plot_update_interval": 100
+        "plot_update_interval": 100,
+        "sensor_source": "free_sphere"
     }
 }
