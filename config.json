@@ -4,7 +4,7 @@
         "RPM_PUMP": 100.0,
         "RPM_AXIS": 200.0,
         "RPM_FORCE": 60.0,
-        "EXPERIMENT_DURATION_S": 86400.0,
+        "EXPERIMENT_DURATION_S": 60.0,
         "TARGET_FORCE_N": 5.0
     },
     "serial_settings": {
@@ -16,6 +16,6 @@
         "save_directory": "experiment_data",
         "auto_save": true,
         "plot_update_interval": 100,
-        "sensor_source": "simple_fixed"
+        "sensor_source": "free_sphere"
     }
 }

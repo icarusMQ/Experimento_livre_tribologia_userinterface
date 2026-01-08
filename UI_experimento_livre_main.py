@@ -512,6 +512,7 @@ class TribologyExperimentGUI:
         self.start_button.config(state=tk.NORMAL)
         self.stop_button.config(state=tk.DISABLED)
         self.progress_label.set("Experiment Stopped")
+        self.progress_var.set(0)
 
         # Reset experiment time indicator
         if hasattr(self, "lc_time_var"):
@@ -552,11 +553,11 @@ class TribologyExperimentGUI:
         
         # Update live sensors tab values when present.
         # Keep the experiment time indicator stable when the experiment is stopped.
-        if "time" in mapped and self.is_experiment_running:
+        if self.is_experiment_running:
             try:
-                self.lc_time_var.set(f"{float(mapped['time']):.2f}")
+                self.lc_time_var.set(f"{float(self.data_manager.get_last_elapsed_time()):.2f}")
             except Exception:
-                self.lc_time_var.set(str(mapped.get("time")))
+                pass
         if "force_x" in mapped:
             try:
                 self.lc_x_var.set(f"{float(mapped['force_x']):.3f}")

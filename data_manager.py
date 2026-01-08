@@ -31,6 +31,10 @@ class DataManager:
         self._csv_writer: Optional[csv.DictWriter] = None
         self._rows_written = 0
         self._flush_every = 200
+
+        # Firmware time often keeps counting across experiments; normalize to elapsed time.
+        self._device_time_zero: Optional[float] = None
+        self._last_elapsed_time_s: float = 0.0
         
         # Create save directory if it doesn't exist
         os.makedirs(save_directory, exist_ok=True)
@@ -48,6 +52,10 @@ class DataManager:
         self._plot_timestamp.clear()
         self.current_data = pd.DataFrame()
 
+        # Reset time normalization
+        self._device_time_zero = None
+        self._last_elapsed_time_s = 0.0
+
         # Create a live CSV file immediately so long runs don't depend on RAM
         timestamp = self.experiment_start_time.strftime("%Y%m%d_%H%M%S")
         self._live_csv_path = os.path.join(self.save_directory, f"experiment_{timestamp}.csv")
@@ -62,6 +70,14 @@ class DataManager:
         if self.auto_save and self._live_csv_path and os.path.exists(self._live_csv_path):
             print(f"Experiment data saved to: {self._live_csv_path}")
         print("Stopped experiment data collection")
+
+        # Reset elapsed time so the next experiment starts at 0
+        self._device_time_zero = None
+        self._last_elapsed_time_s = 0.0
+
+    def get_last_elapsed_time(self) -> float:
+        """Return last known elapsed experiment time (seconds)."""
+        return float(self._last_elapsed_time_s)
 
     def _open_live_csv(self, filepath: str):
         # Fixed schema for stability (avoid dynamic headers mid-run)
@@ -131,7 +147,25 @@ class DataManager:
         
         # Update current dataframe for real-time plotting
         if data.get("is_experiment", False):
-            t = data.get("time", 0)
+            device_t = data.get("time", None)
+            if device_t is None:
+                elapsed_t = self._last_elapsed_time_s
+            else:
+                try:
+                    device_t = float(device_t)
+                except Exception:
+                    device_t = None
+
+                if device_t is None:
+                    elapsed_t = self._last_elapsed_time_s
+                else:
+                    if self._device_time_zero is None:
+                        self._device_time_zero = device_t
+                    elapsed_t = max(0.0, device_t - float(self._device_time_zero))
+
+            self._last_elapsed_time_s = float(elapsed_t)
+
+            t = float(elapsed_t)
             fx = data.get("force_x", np.nan)
             fz = data.get("force_z", np.nan)
             ts = data.get("timestamp")
