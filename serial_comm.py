@@ -13,7 +13,8 @@ class SerialCommunication:
         self.is_connected = False
         self.is_reading = False
         self.read_thread: Optional[threading.Thread] = None
-        self.data_queue = queue.Queue()
+        # Bounded queue to avoid unbounded RAM usage if nobody consumes it.
+        self.data_queue = queue.Queue(maxsize=20000)
         self.data_callback: Optional[Callable] = None
         
     def connect(self, port: str, baudrate: int = 115200, timeout: float = 1.0) -> bool:
@@ -57,11 +58,16 @@ class SerialCommunication:
     def _read_data(self):
         """Internal method to read data from serial port."""
         buffer = ""
+        max_buffer_len = 1024 * 1024  # 1MB safety cap
         while self.is_reading and self.is_connected:
             try:
                 if self.serial_port and self.serial_port.in_waiting > 0:
                     chunk = self.serial_port.read(self.serial_port.in_waiting).decode('utf-8', errors='ignore')
                     buffer += chunk
+
+                    # Safety: if firmware stops sending newlines, buffer could grow forever.
+                    if len(buffer) > max_buffer_len:
+                        buffer = buffer[-10000:]
                     
                     # Process complete lines
                     while '\n' in buffer or '\r' in buffer:
@@ -84,7 +90,18 @@ class SerialCommunication:
         """Process a received line of data."""
         data = self.parse_data_line(line)
         if data:
-            self.data_queue.put(data)
+            try:
+                self.data_queue.put_nowait(data)
+            except queue.Full:
+                # Drop oldest and retry
+                try:
+                    self.data_queue.get_nowait()
+                except queue.Empty:
+                    pass
+                try:
+                    self.data_queue.put_nowait(data)
+                except queue.Full:
+                    pass
             if self.data_callback:
                 self.data_callback(data)
     

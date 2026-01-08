@@ -7,6 +7,7 @@ import threading
 import time
 from datetime import datetime
 import os
+import queue
 
 from config import Config
 from serial_comm import SerialCommunication
@@ -24,7 +25,15 @@ class TribologyExperimentGUI:
         # Initialize components
         self.config = Config()
         self.serial_comm = SerialCommunication()
-        self.data_manager = DataManager(self.config.get("data_settings", "save_directory"))
+        plot_max_points = int(self.config.get("data_settings", "plot_max_points") or 5000)
+        self.data_manager = DataManager(
+            self.config.get("data_settings", "save_directory"),
+            plot_max_points=plot_max_points,
+            auto_save=bool(self.config.get("data_settings", "auto_save"))
+        )
+
+        # Serial data arrives on a background thread; Tkinter must only be touched on the main thread.
+        self._serial_incoming_queue: "queue.Queue[dict]" = queue.Queue(maxsize=20000)
         
         # GUI state variables
         self.is_experiment_running = False
@@ -285,7 +294,22 @@ class TribologyExperimentGUI:
     
     def setup_serial_callback(self):
         """Setup callback for serial data."""
-        self.serial_comm.set_data_callback(self.handle_serial_data)
+        self.serial_comm.set_data_callback(self._on_serial_data_thread)
+
+    def _on_serial_data_thread(self, data):
+        """Called from the serial reader thread; never touch Tkinter here."""
+        try:
+            self._serial_incoming_queue.put_nowait(data)
+        except queue.Full:
+            # Drop oldest to make room
+            try:
+                self._serial_incoming_queue.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                self._serial_incoming_queue.put_nowait(data)
+            except queue.Full:
+                pass
 
     def setup_sensors_tab(self):
         """Setup live sensors (load cells) tab."""
@@ -454,6 +478,10 @@ class TribologyExperimentGUI:
         
         # Start data collection
         self.data_manager.start_experiment()
+
+        # Reset experiment time indicator
+        if hasattr(self, "lc_time_var"):
+            self.lc_time_var.set("0.00")
         
         # Send start command to device
         if self.serial_comm.start_experiment():
@@ -484,11 +512,15 @@ class TribologyExperimentGUI:
         self.start_button.config(state=tk.NORMAL)
         self.stop_button.config(state=tk.DISABLED)
         self.progress_label.set("Experiment Stopped")
+
+        # Reset experiment time indicator
+        if hasattr(self, "lc_time_var"):
+            self.lc_time_var.set("0.00")
         
         self.log_status("Experiment stopped")
     
     def handle_serial_data(self, data):
-        """Handle incoming serial data."""
+        """Handle incoming serial data (must be called on the Tkinter/main thread)."""
         # Choose mapping for sensors based on selection
         source = self.config.get("data_settings", "sensor_source") or "simple_fixed"
 
@@ -518,8 +550,9 @@ class TribologyExperimentGUI:
         if "message" in data:
             self.log_status(f"Device: {data['message']}")
         
-        # Update live sensors tab values when present
-        if "time" in mapped:
+        # Update live sensors tab values when present.
+        # Keep the experiment time indicator stable when the experiment is stopped.
+        if "time" in mapped and self.is_experiment_running:
             try:
                 self.lc_time_var.set(f"{float(mapped['time']):.2f}")
             except Exception:
@@ -538,30 +571,40 @@ class TribologyExperimentGUI:
     def update_plots(self):
         """Update the data plots."""
         df = self.data_manager.get_current_data()
-        
-        if not df.empty:
-            # Clear previous plots
-            self.ax1.clear()
-            self.ax2.clear()
-            
-            # Plot Force X
+        if df.empty:
+            return
+
+        # Lazily create line objects once, then only update data (much faster for long runs).
+        if not hasattr(self, "_line_fx"):
+            (self._line_fx,) = self.ax1.plot([], [], 'b-', linewidth=1)
+            self.ax1.set_title("Force X (N) vs Time")
+            self.ax1.set_xlabel("Time (s)")
+            self.ax1.set_ylabel("Force X (N)")
+            self.ax1.grid(True)
+
+        if not hasattr(self, "_line_fz"):
+            (self._line_fz,) = self.ax2.plot([], [], 'r-', linewidth=1)
+            self.ax2.set_title("Force Z (N) vs Time")
+            self.ax2.set_xlabel("Time (s)")
+            self.ax2.set_ylabel("Force Z (N)")
+            self.ax2.grid(True)
+
+        if "time" in df.columns:
+            x = df["time"].to_numpy()
+
             if "force_x" in df.columns and not df["force_x"].isna().all():
-                self.ax1.plot(df["time"], df["force_x"], 'b-', linewidth=1)
-                self.ax1.set_title("Force X (N) vs Time")
-                self.ax1.set_xlabel("Time (s)")
-                self.ax1.set_ylabel("Force X (N)")
-                self.ax1.grid(True)
-            
-            # Plot Force Z
+                y = df["force_x"].to_numpy()
+                self._line_fx.set_data(x, y)
+                self.ax1.relim()
+                self.ax1.autoscale_view()
+
             if "force_z" in df.columns and not df["force_z"].isna().all():
-                self.ax2.plot(df["time"], df["force_z"], 'r-', linewidth=1)
-                self.ax2.set_title("Force Z (N) vs Time")
-                self.ax2.set_xlabel("Time (s)")
-                self.ax2.set_ylabel("Force Z (N)")
-                self.ax2.grid(True)
-            
-            self.fig.tight_layout()
-            self.canvas.draw()
+                y = df["force_z"].to_numpy()
+                self._line_fz.set_data(x, y)
+                self.ax2.relim()
+                self.ax2.autoscale_view()
+
+        self.canvas.draw_idle()
     
     def update_progress(self):
         """Update experiment progress."""
@@ -641,6 +684,16 @@ class TribologyExperimentGUI:
     def update_gui(self):
         """Main GUI update loop."""
         try:
+            # Drain serial data queue on the Tkinter thread
+            processed = 0
+            while processed < 2000:
+                try:
+                    item = self._serial_incoming_queue.get_nowait()
+                except queue.Empty:
+                    break
+                self.handle_serial_data(item)
+                processed += 1
+
             # Update plots if data is available
             if self.data_manager.current_data is not None and not self.data_manager.current_data.empty:
                 self.update_plots()
@@ -652,7 +705,8 @@ class TribologyExperimentGUI:
             print(f"GUI update error: {e}")
         
         # Schedule next update
-        self.root.after(100, self.update_gui)
+        interval_ms = int(self.config.get("data_settings", "plot_update_interval") or 100)
+        self.root.after(max(20, interval_ms), self.update_gui)
     
     def on_closing(self):
         """Handle application closing."""
